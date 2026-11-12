@@ -2,6 +2,19 @@ import { Permission, Role, TablesDBIndexType } from "node-appwrite";
 import { db, questionTable } from "../name";
 import { tablesDB } from "./config";
 
+// Poll until the column is ready (Appwrite provisions columns asynchronously)
+async function waitForColumn(tableId: string, key: string) {
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const column = await tablesDB.getColumn({ databaseId: db, tableId, key });
+    if (column.status === "available") return;
+    if (column.status === "failed") {
+      throw new Error(`Column ${key} failed to provision`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`Column ${key} did not become available in time`);
+}
+
 export default async function createQuestionTable() {
   // Create Table
   await tablesDB.createTable({
@@ -59,6 +72,12 @@ export default async function createQuestionTable() {
   ]);
   console.log("Question columns created");
 
+  // Indexed columns must be available before we can create indexes on them
+  await Promise.all([
+    waitForColumn(questionTable, "title"),
+    waitForColumn(questionTable, "content"),
+  ]);
+
   // Create indexes
   await Promise.all([
     tablesDB.createIndex({
@@ -76,4 +95,5 @@ export default async function createQuestionTable() {
       columns: ["content"],
     }),
   ]);
+  console.log("Question indexes created");
 }
